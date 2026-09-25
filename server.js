@@ -407,9 +407,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Stitch UI  http://localhost:${PORT}`);
-  console.log(
-    llmEnabled()
-      ? `AI director  on  (${llmConfig.model})${whisperEnabled() ? " + Whisper" : " (no Whisper)"}`
-      : "AI director  off — set LLM_API_KEY in edit/.env"
-  );
+  console.log("Mode  Manual (browser stitch) — Auto/AI UI hidden");
 });
