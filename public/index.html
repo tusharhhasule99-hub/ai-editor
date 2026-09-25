@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stitch</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #12110e;
+      --panel: #1c1b16;
+      --line: #343128;
+      --ink: #f4f0e6;
+      --muted: #a39b8c;
+      --amber: #e7a23a;
+      --amber-ink: #1c1408;
+      --danger: #e36a5d;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(900px 420px at 50% -10%, #2a2418 0%, transparent 60%),
+        var(--bg);
+      color: var(--ink);
+      font: 15px/1.45 ui-sans-serif, system-ui, sans-serif;
+    }
+
+    main {
+      width: min(720px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 36px 0 64px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-family: Palatino, "Iowan Old Style", Georgia, serif;
+      font-size: 40px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+    }
+
+    header p {
+      margin: 6px 0 0;
+      color: var(--muted);
+    }
+
+    .drop {
+      margin-top: 28px;
+      border: 1.5px dashed #5c5648;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.02);
+      min-height: 132px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 22px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .drop:hover, .drop.hot {
+      border-color: var(--amber);
+      background: rgba(231, 162, 58, 0.06);
+    }
+
+    .drop strong { display: block; font-size: 16px; }
+    .drop span { color: var(--muted); font-size: 13px; }
+
+    .demo-head {
+      margin-top: 22px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .demo-head h2 { margin: 0; }
+
+    button.quiet {
+      border: 0;
+      background: transparent;
+      color: var(--amber);
+      font: 600 13px/1 ui-sans-serif, system-ui, sans-serif;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .demos {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      margin-top: 10px;
+      padding-bottom: 4px;
+    }
+
+    .demo {
+      flex: 0 0 120px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 6px;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .demo:hover { border-color: var(--amber); }
+    .demo video {
+      width: 100%;
+      height: 64px;
+      object-fit: cover;
+      border-radius: 8px;
+      background: #000;
+      pointer-events: none;
+    }
+    .demo span {
+      display: block;
+      margin-top: 6px;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .timeline {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+      overflow-x: auto;
+      margin-top: 18px;
+      padding-bottom: 6px;
+    }
+
+    .clip {
+      flex: 0 0 148px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .clip.over { border-color: var(--amber); }
+    .clip video {
+      width: 100%;
+      height: 78px;
+      object-fit: cover;
+      border-radius: 8px;
+      background: #000;
+    }
+
+    .clip .name {
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .clip .meta {
+      color: var(--muted);
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .clip button {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0 2px;
+      font: inherit;
+    }
+
+    .clip button:hover { color: var(--ink); }
+
+    .join {
+      flex: 0 0 auto;
+      align-self: center;
+      color: var(--amber);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      max-width: 72px;
+      text-align: center;
+    }
+
+    section { margin-top: 26px; }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .chip { position: relative; }
+
+    .chip input {
+      position: absolute;
+      opacity: 0;
+      inset: 0;
+      margin: 0;
+      cursor: pointer;
+    }
+
+    .chip span {
+      display: block;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+
+    .chip input:focus-visible + span { outline: 2px solid var(--amber); outline-offset: 2px; }
+    .chip input:checked + span {
+      background: var(--amber);
+      color: var(--amber-ink);
+      border-color: var(--amber);
+      font-weight: 600;
+    }
+
+    .duration {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 12px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .duration.off { opacity: 0.35; }
+
+    input[type="range"] { width: 100%; accent-color: var(--amber); }
+
+    .actions {
+      margin-top: 22px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    button.primary, a.download {
+      appearance: none;
+      border: 0;
+      background: var(--amber);
+      color: var(--amber-ink);
+      font: 600 15px/1 ui-sans-serif, system-ui, sans-serif;
+      padding: 12px 18px;
+      border-radius: 999px;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .status { color: var(--muted); font-size: 13px; }
+    .error {
+      margin-top: 14px;
+      color: var(--danger);
+      background: rgba(227, 106, 93, 0.1);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+
+    .result { margin-top: 28px; }
+    .result video {
+      width: 100%;
+      border-radius: 14px;
+      background: #000;
+      max-height: 420px;
+    }
+
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Stitch</h1>
+      <p>Drop clips in order, pick how they join, and play the result.</p>
+    </header>
+
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Upload videos">
+      <div>
+        <strong>Drop videos here</strong>
+        <span>or click to choose · mp4, mov, webm</span>
+      </div>
+    </div>
+    <input id="picker" type="file" accept="video/*" multiple hidden />
+
+    <section id="demos" class="hidden">
+      <div class="demo-head">
+        <h2>Demo clips</h2>
+        <button class="quiet" id="addAll" type="button">Add all</button>
+      </div>
+      <div class="demos" id="demoRow"></div>
+    </section>
+
+    <div class="timeline" id="timeline"></div>
+
+    <section>
+      <h2>Join</h2>
+      <div class="chips" id="chips"></div>
+      <label class="duration" id="durationRow">
+        <span>Length</span>
+        <input id="duration" type="range" min="0.2" max="2" step="0.1" value="0.6" />
+        <span id="durationLabel">0.6s</span>
+      </label>
+    </section>
+
+    <div class="actions">
+      <button class="primary" id="go" type="button" disabled>Stitch</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="error hidden" id="error"></div>
+
+    <section class="result hidden" id="result">
+      <h2>Result</h2>
+      <video id="player" controls playsinline></video>
+      <div class="actions">
+        <a class="download" id="download" download="stitch.mp4">Download</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const JOINS = [
+      ["cut", "Direct cut"],
+      ["fade", "Fade"],
+      ["dissolve", "Dissolve"],
+      ["fadeblack", "Fade black"],
+      ["wipeleft", "Wipe left"],
+      ["wiperight", "Wipe right"],
+      ["slideleft", "Slide left"],
+      ["circleopen", "Circle"],
+    ];
+
+    const drop = document.getElementById("drop");
+    const picker = document.getElementById("picker");
+    const timeline = document.getElementById("timeline");
+    const chips = document.getElementById("chips");
+    const duration = document.getElementById("duration");
+    const durationLabel = document.getElementById("durationLabel");
+    const durationRow = document.getElementById("durationRow");
+    const go = document.getElementById("go");
+    const statusEl = document.getElementById("status");
+    const errorEl = document.getElementById("error");
+    const result = document.getElementById("result");
+    const player = document.getElementById("player");
+    const download = document.getElementById("download");
+    const demos = document.getElementById("demos");
+    const demoRow = document.getElementById("demoRow");
+    const addAll = document.getElementById("addAll");
+    let demoFiles = [];
+
+    let clips = [];
+    let dragId = null;
+    let resultUrl = null;
+
+    chips.innerHTML = JOINS.map(([id, label], i) => `
+      <label class="chip">
+        <input type="radio" name="join" value="${id}" ${i === 0 ? "checked" : ""} />
+        <span>${label}</span>
+      </label>
+    `).join("");
+
+    function selectedJoin() {
+      return document.querySelector('input[name="join"]:checked').value;
+    }
+
+    function joinLabel() {
+      const id = selectedJoin();
+      return JOINS.find(([k]) => k === id)[1];
+    }
+
+    function fmtSize(n) {
+      if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function fmtTime(s) {
+      if (!Number.isFinite(s)) return "";
+      const m = Math.floor(s / 60);
+      const sec = Math.round(s % 60);
+      return m ? `${m}:${String(sec).padStart(2, "0")}` : `${s.toFixed(1)}s`;
+    }
+
+    function syncDuration() {
+      const cut = selectedJoin() === "cut";
+      durationRow.classList.toggle("off", cut);
+      duration.disabled = cut;
+      durationLabel.textContent = `${Number(duration.value).toFixed(1)}s`;
+    }
+
+    function render() {
+      go.disabled = clips.length < 2;
+      if (!clips.length) {
+        timeline.innerHTML = "";
+        return;
+      }
+      const label = joinLabel();
+      timeline.innerHTML = clips.map((clip, i) => {
+        const join = i < clips.length - 1 ? `<div class="join">${label}</div>` : "";
+        return `
+          <article class="clip" draggable="true" data-id="${clip.id}">
+            <video src="${clip.url}" muted preload="metadata"></video>
+            <div class="name" title="${clip.file.name}">${clip.file.name}</div>
+            <div class="meta">
+              <span>${fmtTime(clip.duration)} · ${fmtSize(clip.file.size)}</span>
+              <span>
+                <button type="button" data-move="-1" data-id="${clip.id}" aria-label="Move earlier">↑</button>
+                <button type="button" data-move="1" data-id="${clip.id}" aria-label="Move later">↓</button>
+                <button type="button" data-remove="${clip.id}" aria-label="Remove">×</button>
+              </span>
+            </div>
+          </article>
+          ${join}`;
+      }).join("");
+    }
+
+    function addFiles(list) {
+      for (const file of list) {
+        if (!file.type.startsWith("video/") && !/\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(file.name)) continue;
+        const clip = {
+          id: crypto.randomUUID(),
+          file,
+          url: URL.createObjectURL(file),
+          duration: NaN,
+        };
+        const probe = document.createElement("video");
+        probe.preload = "metadata";
+        probe.src = clip.url;
+        probe.onloadedmetadata = () => {
+          clip.duration = probe.duration;
+          render();
+        };
+        clips.push(clip);
+      }
+      render();
+    }
+
+    drop.addEventListener("click", () => picker.click());
+    drop.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        picker.click();
+      }
+    });
+    picker.addEventListener("change", () => {
+      addFiles(picker.files);
+      picker.value = "";
+    });
+
+    ["dragenter", "dragover"].forEach((ev) => {
+      drop.addEventListener(ev, (e) => {
+        e.preventDefault();
+        drop.classList.add("hot");
+      });
+    });
+    drop.addEventListener("dragleave", () => drop.classList.remove("hot"));
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      drop.classList.remove("hot");
+      addFiles(e.dataTransfer.files);
+    });
+    window.addEventListener("dragover", (e) => e.preventDefault());
+    window.addEventListener("drop", (e) => e.preventDefault());
+
+    timeline.addEventListener("click", (e) => {
+      const remove = e.target.closest("[data-remove]");
+      const move = e.target.closest("[data-move]");
+      if (remove) {
+        const clip = clips.find((c) => c.id === remove.dataset.remove);
+        if (clip) URL.revokeObjectURL(clip.url);
+        clips = clips.filter((c) => c.id !== remove.dataset.remove);
+        render();
+      }
+      if (move) {
+        const index = clips.findIndex((c) => c.id === move.dataset.id);
+        const next = index + Number(move.dataset.move);
+        if (index < 0 || next < 0 || next >= clips.length) return;
+        const [item] = clips.splice(index, 1);
+        clips.splice(next, 0, item);
+        render();
+      }
+    });
+
+    timeline.addEventListener("dragstart", (e) => {
+      const card = e.target.closest(".clip");
+      if (!card) return;
+      dragId = card.dataset.id;
+    });
+    timeline.addEventListener("dragover", (e) => {
+      const card = e.target.closest(".clip");
+      if (!card) return;
+      e.preventDefault();
+      card.classList.add("over");
+    });
+    timeline.addEventListener("dragleave", (e) => {
+      e.target.closest(".clip")?.classList.remove("over");
+    });
+    timeline.addEventListener("drop", (e) => {
+      const card = e.target.closest(".clip");
+      if (!card || !dragId || card.dataset.id === dragId) return;
+      e.preventDefault();
+      const from = clips.findIndex((c) => c.id === dragId);
+      const to = clips.findIndex((c) => c.id === card.dataset.id);
+      const [item] = clips.splice(from, 1);
+      clips.splice(to, 0, item);
+      dragId = null;
+      render();
+    });
+
+    chips.addEventListener("change", () => {
+      syncDuration();
+      render();
+    });
+    duration.addEventListener("input", syncDuration);
+
+    function showError(message) {
+      errorEl.textContent = message;
+      errorEl.classList.remove("hidden");
+    }
+
+    go.addEventListener("click", () => {
+      errorEl.classList.add("hidden");
+      go.disabled = true;
+      statusEl.textContent = "Uploading…";
+
+      const body = new FormData();
+      for (const clip of clips) body.append("files", clip.file, clip.file.name);
+      body.append("transitionType", selectedJoin());
+      body.append("duration", duration.value);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/stitch");
+      xhr.responseType = "blob";
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        statusEl.textContent = `Uploading ${Math.round((e.loaded / e.total) * 100)}%`;
+      };
+      xhr.upload.onload = () => {
+        statusEl.textContent = "Stitching…";
+      };
+      xhr.onload = () => {
+        go.disabled = clips.length < 2;
+        if (xhr.status !== 200) {
+          statusEl.textContent = "";
+          const blob = xhr.response;
+          const reader = new FileReader();
+          reader.onload = () => {
+            try {
+              showError(JSON.parse(reader.result).error || "Stitch failed");
+            } catch {
+              showError("Stitch failed");
+            }
+          };
+          reader.readAsText(blob);
+          return;
+        }
+        if (resultUrl) URL.revokeObjectURL(resultUrl);
+        resultUrl = URL.createObjectURL(xhr.response);
+        player.src = resultUrl;
+        download.href = resultUrl;
+        result.classList.remove("hidden");
+        statusEl.textContent = "Ready";
+        player.play().catch(() => {});
+      };
+      xhr.onerror = () => {
+        go.disabled = clips.length < 2;
+        statusEl.textContent = "";
+        showError("Could not reach the stitcher");
+      };
+      xhr.send(body);
+    });
+
+    async function fileFromDemo(item) {
+      const res = await fetch(item.url);
+      if (!res.ok) throw new Error(`Could not load ${item.name}`);
+      const blob = await res.blob();
+      return new File([blob], item.name, { type: blob.type || "video/mp4" });
+    }
+
+    async function loadDemos(items) {
+      statusEl.textContent = "Loading demo clips…";
+      errorEl.classList.add("hidden");
+      try {
+        const files = await Promise.all(items.map(fileFromDemo));
+        addFiles(files);
+        statusEl.textContent = "";
+      } catch (err) {
+        statusEl.textContent = "";
+        showError(err.message);
+      }
+    }
+
+    addAll.addEventListener("click", () => loadDemos(demoFiles));
+    demoRow.addEventListener("click", (e) => {
+      const button = e.target.closest("[data-demo]");
+      if (!button) return;
+      const item = demoFiles.find((file) => file.name === button.dataset.demo);
+      if (item) loadDemos([item]);
+    });
+
+    fetch("/api/demos")
+      .then((res) => res.json())
+      .then((data) => {
+        demoFiles = data.files || [];
+        if (!demoFiles.length) return;
+        demos.classList.remove("hidden");
+        demoRow.innerHTML = demoFiles.map((file) => `
+          <button class="demo" type="button" data-demo="${file.name}">
+            <video src="${file.url}" muted preload="metadata"></video>
+            <span>${file.name}</span>
+          </button>
+        `).join("");
+        loadDemos(demoFiles);
+      })
+      .catch(() => {});
+
+    syncDuration();
+  </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+
+# Local / generated media (keep demo assets/)
+/*.mp4
+/*.mov
+/*.avi
+/*.mkv
+/*.webm
+/output*.mp4
