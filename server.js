@@ -9,12 +9,17 @@ import { randomBytes } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { createReadStream } from "node:fs";
 import Busboy from "busboy";
-import { stitch, TRANSITIONS } from "./stitch.js";
+import { stitch, TRANSITIONS, probe, renderEditPlan } from "./stitch.js";
+import { detectBeats } from "./lib/beats.js";
+import { directEdit } from "./lib/aiDirector.js";
+import { llmConfig, llmEnabled, whisperEnabled } from "./lib/config.js";
 
 const PORT = Number(process.env.PORT) || 3847;
 const MAX_FILES = 12;
 const MAX_FILE_BYTES = 1024 ** 3;
 const VIDEO_EXT = /\.(mp4|mov|m4v|webm|mkv|avi|mpeg|mpg)$/i;
+const AUDIO_EXT = /\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i;
+const ASSET_EXT = /\.(mp4|mov|m4v|webm|mkv|avi|mpeg|mpg|mp3|wav|m4a|aac|flac|ogg|opus)$/i;
 
 const htmlPath = new URL("./public/index.html", import.meta.url);
 const assetsDir = join(fileURLToPath(new URL(".", import.meta.url)), "assets");
@@ -27,13 +32,24 @@ const MIME = {
   ".avi": "video/x-msvideo",
   ".mpeg": "video/mpeg",
   ".mpg": "video/mpeg",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".flac": "audio/flac",
+  ".ogg": "audio/ogg",
+  ".opus": "audio/opus",
 };
 
 async function listDemos() {
   const names = await readdir(assetsDir).catch(() => []);
-  return names
+  const videos = names
     .filter((name) => VIDEO_EXT.test(name) && !name.startsWith("."))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const audio = names
+    .filter((name) => AUDIO_EXT.test(name) && !name.startsWith("."))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return { videos, audio };
 }
 
 async function sendFile(req, res, filePath) {
@@ -110,7 +126,7 @@ function readForm(req, jobDir) {
     try {
       bb = Busboy({
         headers: req.headers,
-        limits: { files: MAX_FILES, fileSize: MAX_FILE_BYTES, fields: 8, fieldSize: 2048 },
+        limits: { files: MAX_FILES + 2, fileSize: MAX_FILE_BYTES, fields: 12, fieldSize: 2048 },
       });
     } catch (err) {
       fail(err);
@@ -119,6 +135,7 @@ function readForm(req, jobDir) {
 
     const fields = {};
     const files = [];
+    let audio = null;
     const writes = [];
 
     bb.on("field", (name, val) => {
@@ -126,6 +143,13 @@ function readForm(req, jobDir) {
     });
 
     bb.on("file", (name, stream, info) => {
+      if (name === "audio") {
+        const dest = join(jobDir, `audio-${safeName(info.filename, 0)}`);
+        audio = { dest, filename: info.filename || "track", mime: info.mimeType || "" };
+        writes.push(pipeline(stream, createWriteStream(dest)));
+        stream.on("limit", () => fail(new Error("Audio must be under 1 GB")));
+        return;
+      }
       if (name !== "files") {
         stream.resume();
         return;
@@ -146,7 +170,7 @@ function readForm(req, jobDir) {
       Promise.all(writes).then(() => {
         if (settled) return;
         settled = true;
-        resolve({ fields, files });
+        resolve({ fields, files, audio });
       }, fail);
     });
 
@@ -216,6 +240,106 @@ async function handleStitch(req, res) {
   }
 }
 
+async function handleAutoEdit(req, res) {
+  const jobDir = join(tmpdir(), "auto-edit", randomBytes(8).toString("hex"));
+  await mkdir(jobDir, { recursive: true });
+
+  try {
+    const { fields, files, audio } = await readForm(req, jobDir);
+    if (files.length < 1) {
+      sendJson(res, 400, { error: "Add at least one video clip" });
+      return;
+    }
+
+    for (const file of files) {
+      const info = await stat(file.dest);
+      const looksLikeVideo = file.mime.startsWith("video/") || VIDEO_EXT.test(file.filename);
+      if (!looksLikeVideo) {
+        sendJson(res, 400, { error: `${file.filename} is not a video` });
+        return;
+      }
+      if (info.size === 0) {
+        sendJson(res, 400, { error: `${file.filename} is empty` });
+        return;
+      }
+    }
+
+    if (audio) {
+      const info = await stat(audio.dest);
+      const looksLikeAudio =
+        audio.mime.startsWith("audio/") || AUDIO_EXT.test(audio.filename);
+      if (!looksLikeAudio) {
+        sendJson(res, 400, { error: `${audio.filename} is not audio` });
+        return;
+      }
+      if (info.size === 0) {
+        sendJson(res, 400, { error: "Audio file is empty" });
+        return;
+      }
+    }
+
+    const targetDuration = Number(fields.targetDuration ?? 15);
+    const musicPath = audio?.dest || null;
+
+    const clips = [];
+    for (const file of files) {
+      const meta = await probe(file.dest);
+      clips.push({
+        path: file.dest,
+        name: file.filename,
+        duration: meta.duration,
+        width: meta.width,
+        height: meta.height,
+      });
+    }
+
+    let plan;
+    if (llmEnabled()) {
+      plan = await directEdit({
+        clips,
+        musicPath,
+        targetDuration: Number.isFinite(targetDuration) ? targetDuration : 15,
+      });
+    } else {
+      const beatInfo = await detectBeats(musicPath, {
+        targetDuration: Number.isFinite(targetDuration) ? targetDuration : 15,
+        minDuration: 10,
+        maxDuration: 20,
+        fallbackBpm: 120,
+      });
+      const { planEdit } = await import("./lib/planEdit.js");
+      plan = { ...planEdit(clips, beatInfo), planner: "heuristic", fxSource: "rules" };
+    }
+
+    const outPath = join(jobDir, "auto.mp4");
+    await renderEditPlan(plan, { output: outPath, musicPath });
+
+    const size = (await stat(outPath)).size;
+    res.writeHead(200, {
+      "Content-Type": "video/mp4",
+      "Content-Length": size,
+      "Content-Disposition": 'inline; filename="auto-edit.mp4"',
+      "X-Edit-Bpm": String(plan.bpm),
+      "X-Edit-Beats": String(plan.beats.length),
+      "X-Edit-Segments": String(plan.segments.length),
+      "X-Edit-Music-Start": String(plan.musicStart),
+      "X-Edit-Duration": String(plan.musicDuration),
+      "X-Edit-Source": plan.source || "audio",
+      "X-Edit-Planner": plan.planner || "heuristic",
+      "X-Edit-Model": plan.planner === "ai" ? llmConfig.model : "rules",
+      "X-Edit-Whisper": plan.whisper ? "1" : "0",
+      "X-Edit-Fx": plan.fxSource || "rules",
+    });
+    await pipeline(createReadStream(outPath), res);
+  } catch (err) {
+    if (!res.headersSent) sendJson(res, 500, { error: friendly(err) });
+    else res.destroy();
+    console.error(err);
+  } finally {
+    await rm(jobDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -230,23 +354,34 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/demos") {
-      const files = await listDemos();
+    if (req.method === "GET" && url.pathname === "/api/status") {
       sendJson(res, 200, {
-        files: files.map((name) => ({ name, url: `/assets/${encodeURIComponent(name)}` })),
+        llm: llmEnabled(),
+        whisper: whisperEnabled(),
+        model: llmEnabled() ? llmConfig.model : null,
+        baseUrl: llmEnabled() ? llmConfig.baseUrl : null,
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/demos") {
+      const { videos, audio } = await listDemos();
+      sendJson(res, 200, {
+        files: videos.map((name) => ({ name, url: `/assets/${encodeURIComponent(name)}`, kind: "video" })),
+        audio: audio.map((name) => ({ name, url: `/assets/${encodeURIComponent(name)}`, kind: "audio" })),
       });
       return;
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/assets/")) {
       const name = decodeURIComponent(url.pathname.slice("/assets/".length));
-      if (!VIDEO_EXT.test(name) || name.includes("/") || name.includes("..")) {
+      if (!ASSET_EXT.test(name) || name.includes("/") || name.includes("..")) {
         sendJson(res, 404, { error: "Not found" });
         return;
       }
       try {
         await sendFile(req, res, join(assetsDir, name));
-      } catch (err) {
+      } catch {
         if (!res.headersSent) sendJson(res, 404, { error: "Not found" });
         else res.destroy();
       }
@@ -255,6 +390,11 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/api/stitch") {
       await handleStitch(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auto-edit") {
+      await handleAutoEdit(req, res);
       return;
     }
 
@@ -267,4 +407,9 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Stitch UI  http://localhost:${PORT}`);
+  console.log(
+    llmEnabled()
+      ? `AI director  on  (${llmConfig.model})${whisperEnabled() ? " + Whisper" : " (no Whisper)"}`
+      : "AI director  off — set LLM_API_KEY in edit/.env"
+  );
 });

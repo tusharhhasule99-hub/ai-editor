@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import ffmpegPath from "ffmpeg-static";
 import ffprobe from "ffprobe-static";
+import { resolveJoin } from "./lib/fxPack.js";
 
 /** xfade names the UI and CLI are allowed to pass into the filter graph. */
 export const TRANSITIONS = [
@@ -252,6 +253,200 @@ function probe(file) {
       }
     });
   });
+}
+
+export { probe };
+
+/**
+ * Render a beat-synced edit plan: trim segments, per-cut transitions, music underlay.
+ *
+ * @param {{ segments: Array<{ clip: string, in: number, out: number, transition: string, transitionDuration: number }>, musicStart: number, musicDuration: number }} plan
+ * @param {object} opts
+ * @param {string} opts.output
+ * @param {string|null} [opts.musicPath]
+ * @returns {Promise<string>}
+ */
+export async function renderEditPlan(plan, { output, musicPath = null } = {}) {
+  if (!plan?.segments?.length) throw new Error("Edit plan has no segments");
+  const absOutput = resolve(output);
+  const jobDir = resolve(tmpdir(), `editplan-${randomBytes(8).toString("hex")}`);
+  const { mkdir, rm } = await import("node:fs/promises");
+  await mkdir(jobDir, { recursive: true });
+
+  try {
+    const metas = [];
+    for (const seg of plan.segments) {
+      await access(seg.clip).catch(() => {
+        throw new Error(`File not found: ${seg.clip}`);
+      });
+      metas.push(await probe(seg.clip));
+    }
+
+    const { W, H, fps } = canvasOf(
+      metas.map((m, i) => ({
+        width: m.width,
+        height: m.height,
+        duration: plan.segments[i].out - plan.segments[i].in,
+      }))
+    );
+
+    // Extract normalized silent video segments
+    const segPaths = [];
+    for (let i = 0; i < plan.segments.length; i++) {
+      const seg = plan.segments[i];
+      const take = Math.max(0.1, seg.out - seg.in);
+      const dest = resolve(jobDir, `seg-${String(i).padStart(3, "0")}.mp4`);
+      await run(ffmpegPath, [
+        "-y",
+        "-ss", String(seg.in),
+        "-t", String(take),
+        "-i", resolve(seg.clip),
+        "-an",
+        "-vf",
+        `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+          `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},format=yuv420p`,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        dest,
+      ]);
+      segPaths.push(dest);
+    }
+
+    let current = segPaths[0];
+    for (let i = 1; i < segPaths.length; i++) {
+      const next = segPaths[i];
+      const joined = resolve(jobDir, `join-${String(i).padStart(3, "0")}.mp4`);
+      const inbound = plan.segments[i];
+      const metaA = await probe(current);
+      const join = resolveJoin(
+        {
+          fx: inbound.fx || inbound.transition || "cut",
+          duration: inbound.durationFx ?? inbound.transitionDuration ?? 0.16,
+        },
+        { offset: Math.max(0.05, metaA.duration - (inbound.durationFx ?? inbound.transitionDuration ?? 0.16)) }
+      );
+
+      if (join.mode === "concat") {
+        await concatTwo(current, next, joined);
+      } else if (join.mode === "filter") {
+        await filterJoin(current, next, joined, join.filterComplex);
+      } else {
+        const tType = TRANSITIONS.includes(inbound.transition) ? inbound.transition : "fadewhite";
+        await xfadeTwo(current, next, joined, tType, Math.min(Number(inbound.transitionDuration) || 0.16, 0.35));
+      }
+      current = joined;
+    }
+
+    const videoOnly = current;
+    const videoMeta = await probe(videoOnly);
+    const musicDur = Math.min(
+      plan.musicDuration || videoMeta.duration,
+      videoMeta.duration
+    );
+
+    if (musicPath) {
+      await access(musicPath).catch(() => {
+        throw new Error(`Music not found: ${musicPath}`);
+      });
+      const start = Number(plan.musicStart) || 0;
+      await run(ffmpegPath, [
+        "-y",
+        "-i", videoOnly,
+        "-ss", String(start),
+        "-t", String(musicDur),
+        "-i", resolve(musicPath),
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        "-movflags", "+faststart",
+        absOutput,
+      ]);
+    } else {
+      // Silent bed so players always get an audio stream
+      await run(ffmpegPath, [
+        "-y",
+        "-i", videoOnly,
+        "-f", "lavfi",
+        "-i", `anullsrc=channel_layout=stereo:sample_rate=44100`,
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-t", String(videoMeta.duration),
+        "-shortest",
+        "-movflags", "+faststart",
+        absOutput,
+      ]);
+    }
+
+    return absOutput;
+  } finally {
+    await rm(jobDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function concatTwo(a, b, out) {
+  const listPath = resolve(tmpdir(), `c2-${randomBytes(6).toString("hex")}.txt`);
+  const body = [a, b].map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
+  await writeFile(listPath, body);
+  try {
+    await run(ffmpegPath, [
+      "-y", "-f", "concat", "-safe", "0", "-i", listPath,
+      "-c", "copy",
+      out,
+    ]);
+  } catch {
+    // Fallback re-encode if codecs differ
+    await run(ffmpegPath, [
+      "-y", "-f", "concat", "-safe", "0", "-i", listPath,
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+      "-an",
+      out,
+    ]);
+  } finally {
+    await unlink(listPath).catch(() => {});
+  }
+}
+
+async function filterJoin(a, b, out, filterComplex) {
+  await run(ffmpegPath, [
+    "-y",
+    "-i", a,
+    "-i", b,
+    "-filter_complex", filterComplex,
+    "-map", "[v]",
+    "-an",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "23",
+    "-pix_fmt", "yuv420p",
+    out,
+  ]);
+}
+
+async function xfadeTwo(a, b, out, type, duration) {
+  const metaA = await probe(a);
+  const offset = Math.max(0.05, metaA.duration - duration);
+  await run(ffmpegPath, [
+    "-y",
+    "-i", a,
+    "-i", b,
+    "-filter_complex",
+    `[0:v][1:v]xfade=transition=${type}:duration=${duration.toFixed(3)}:offset=${offset.toFixed(3)}[v]`,
+    "-map", "[v]",
+    "-an",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "23",
+    "-pix_fmt", "yuv420p",
+    out,
+  ]);
 }
 
 function run(bin, args) {

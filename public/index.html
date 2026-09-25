@@ -48,12 +48,34 @@
       color: var(--muted);
     }
 
+    .modes {
+      margin-top: 22px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .modes button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font: 600 13px/1 ui-sans-serif, system-ui, sans-serif;
+      cursor: pointer;
+    }
+
+    .modes button.active {
+      background: var(--amber);
+      color: var(--amber-ink);
+      border-color: var(--amber);
+    }
+
     .drop {
-      margin-top: 28px;
+      margin-top: 20px;
       border: 1.5px dashed #5c5648;
       border-radius: 16px;
       background: rgba(255, 255, 255, 0.02);
-      min-height: 132px;
+      min-height: 120px;
       display: grid;
       place-items: center;
       text-align: center;
@@ -69,6 +91,8 @@
 
     .drop strong { display: block; font-size: 16px; }
     .drop span { color: var(--muted); font-size: 13px; }
+
+    .drop.audio { min-height: 88px; margin-top: 12px; }
 
     .demo-head {
       margin-top: 22px;
@@ -110,13 +134,19 @@
     }
 
     .demo:hover { border-color: var(--amber); }
-    .demo video {
+    .demo video, .demo.audio-card {
       width: 100%;
       height: 64px;
       object-fit: cover;
       border-radius: 8px;
       background: #000;
       pointer-events: none;
+    }
+    .demo.audio-card {
+      display: grid;
+      place-items: center;
+      color: var(--amber);
+      font-size: 22px;
     }
     .demo span {
       display: block;
@@ -193,6 +223,21 @@
       text-align: center;
     }
 
+    .track-card {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .track-card strong { display: block; font-size: 14px; }
+    .track-card span { color: var(--muted); font-size: 12px; }
+
     section { margin-top: 26px; }
 
     h2 {
@@ -252,6 +297,7 @@
       display: flex;
       gap: 10px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     button.primary, a.download {
@@ -286,15 +332,48 @@
       max-height: 420px;
     }
 
-    .hidden { display: none; }
+    .hint {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .ai-pill {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      vertical-align: middle;
+    }
+
+    .ai-pill.on {
+      background: rgba(231, 162, 58, 0.2);
+      color: var(--amber);
+    }
+
+    .ai-pill.off {
+      background: rgba(163, 155, 140, 0.15);
+      color: var(--muted);
+    }
+
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
   <main>
     <header>
-      <h1>Stitch</h1>
-      <p>Drop clips in order, pick how they join, and play the result.</p>
+      <h1>Stitch <span class="ai-pill off" id="aiPill">AI off</span></h1>
+      <p id="tagline">Drop clips in order, pick how they join, and play the result.</p>
     </header>
+
+    <div class="modes" role="tablist">
+      <button type="button" class="active" data-mode="manual">Manual</button>
+      <button type="button" data-mode="auto">Auto (beats)</button>
+    </div>
 
     <div class="drop" id="drop" tabindex="0" role="button" aria-label="Upload videos">
       <div>
@@ -304,6 +383,22 @@
     </div>
     <input id="picker" type="file" accept="video/*" multiple hidden />
 
+    <div class="drop audio hidden" id="audioDrop" tabindex="0" role="button" aria-label="Upload music">
+      <div>
+        <strong>Drop a track</strong>
+        <span>mp3, wav, m4a · picks a 10–20s drop window</span>
+      </div>
+    </div>
+    <input id="audioPicker" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac" hidden />
+
+    <div class="track-card hidden" id="trackCard">
+      <div>
+        <strong id="trackName">track</strong>
+        <span id="trackMeta">Ready</span>
+      </div>
+      <button class="quiet" id="clearTrack" type="button">Remove</button>
+    </div>
+
     <section id="demos" class="hidden">
       <div class="demo-head">
         <h2>Demo clips</h2>
@@ -312,9 +407,16 @@
       <div class="demos" id="demoRow"></div>
     </section>
 
+    <section id="demoAudio" class="hidden">
+      <div class="demo-head">
+        <h2>Demo track</h2>
+      </div>
+      <div class="demos" id="demoAudioRow"></div>
+    </section>
+
     <div class="timeline" id="timeline"></div>
 
-    <section>
+    <section id="manualControls">
       <h2>Join</h2>
       <div class="chips" id="chips"></div>
       <label class="duration" id="durationRow">
@@ -322,6 +424,16 @@
         <input id="duration" type="range" min="0.2" max="2" step="0.1" value="0.6" />
         <span id="durationLabel">0.6s</span>
       </label>
+    </section>
+
+    <section id="autoControls" class="hidden">
+      <h2>Window</h2>
+      <label class="duration">
+        <span>Length</span>
+        <input id="targetDuration" type="range" min="10" max="20" step="1" value="15" />
+        <span id="targetLabel">15s</span>
+      </label>
+      <p class="hint">AI picks the drop window, beat cuts, and safe FFmpeg transition packs. Add Whisper for lyric-aware timing.</p>
     </section>
 
     <div class="actions">
@@ -353,11 +465,19 @@
 
     const drop = document.getElementById("drop");
     const picker = document.getElementById("picker");
+    const audioDrop = document.getElementById("audioDrop");
+    const audioPicker = document.getElementById("audioPicker");
+    const trackCard = document.getElementById("trackCard");
+    const trackName = document.getElementById("trackName");
+    const trackMeta = document.getElementById("trackMeta");
+    const clearTrack = document.getElementById("clearTrack");
     const timeline = document.getElementById("timeline");
     const chips = document.getElementById("chips");
     const duration = document.getElementById("duration");
     const durationLabel = document.getElementById("durationLabel");
     const durationRow = document.getElementById("durationRow");
+    const targetDuration = document.getElementById("targetDuration");
+    const targetLabel = document.getElementById("targetLabel");
     const go = document.getElementById("go");
     const statusEl = document.getElementById("status");
     const errorEl = document.getElementById("error");
@@ -366,10 +486,18 @@
     const download = document.getElementById("download");
     const demos = document.getElementById("demos");
     const demoRow = document.getElementById("demoRow");
+    const demoAudio = document.getElementById("demoAudio");
+    const demoAudioRow = document.getElementById("demoAudioRow");
     const addAll = document.getElementById("addAll");
-    let demoFiles = [];
+    const tagline = document.getElementById("tagline");
+    const manualControls = document.getElementById("manualControls");
+    const autoControls = document.getElementById("autoControls");
 
+    let mode = "manual";
+    let demoFiles = [];
+    let demoTracks = [];
     let clips = [];
+    let track = null;
     let dragId = null;
     let resultUrl = null;
 
@@ -408,13 +536,44 @@
       durationLabel.textContent = `${Number(duration.value).toFixed(1)}s`;
     }
 
+    function syncGo() {
+      if (mode === "auto") {
+        go.textContent = "Auto edit";
+        go.disabled = clips.length < 1;
+        download.download = "auto-edit.mp4";
+      } else {
+        go.textContent = "Stitch";
+        go.disabled = clips.length < 2;
+        download.download = "stitch.mp4";
+      }
+    }
+
+    function setMode(next) {
+      mode = next;
+      document.querySelectorAll(".modes button").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.mode === mode);
+      });
+      const auto = mode === "auto";
+      audioDrop.classList.toggle("hidden", !auto);
+      autoControls.classList.toggle("hidden", !auto);
+      manualControls.classList.toggle("hidden", auto);
+      demoAudio.classList.toggle("hidden", !auto || !demoTracks.length);
+      trackCard.classList.toggle("hidden", !auto || !track);
+      tagline.textContent = auto
+        ? "Drop clips + a track. Cuts land on beats in the drop window."
+        : "Drop clips in order, pick how they join, and play the result.";
+      if (auto && !track && demoTracks.length) loadDemoTrack(demoTracks[0]);
+      syncGo();
+      render();
+    }
+
     function render() {
-      go.disabled = clips.length < 2;
+      syncGo();
       if (!clips.length) {
         timeline.innerHTML = "";
         return;
       }
-      const label = joinLabel();
+      const label = mode === "auto" ? "beat" : joinLabel();
       timeline.innerHTML = clips.map((clip, i) => {
         const join = i < clips.length - 1 ? `<div class="join">${label}</div>` : "";
         return `
@@ -455,6 +614,35 @@
       render();
     }
 
+    function setTrack(file) {
+      if (track?.url) URL.revokeObjectURL(track.url);
+      track = {
+        file,
+        url: URL.createObjectURL(file),
+        duration: NaN,
+      };
+      trackName.textContent = file.name;
+      trackMeta.textContent = fmtSize(file.size);
+      trackCard.classList.remove("hidden");
+      const audio = new Audio();
+      audio.preload = "metadata";
+      audio.src = track.url;
+      audio.onloadedmetadata = () => {
+        track.duration = audio.duration;
+        trackMeta.textContent = `${fmtTime(track.duration)} · ${fmtSize(file.size)}`;
+      };
+    }
+
+    function clearTrackFile() {
+      if (track?.url) URL.revokeObjectURL(track.url);
+      track = null;
+      trackCard.classList.add("hidden");
+    }
+
+    document.querySelectorAll(".modes button").forEach((btn) => {
+      btn.addEventListener("click", () => setMode(btn.dataset.mode));
+    });
+
     drop.addEventListener("click", () => picker.click());
     drop.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -467,10 +655,27 @@
       picker.value = "";
     });
 
+    audioDrop.addEventListener("click", () => audioPicker.click());
+    audioDrop.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        audioPicker.click();
+      }
+    });
+    audioPicker.addEventListener("change", () => {
+      if (audioPicker.files[0]) setTrack(audioPicker.files[0]);
+      audioPicker.value = "";
+    });
+    clearTrack.addEventListener("click", clearTrackFile);
+
     ["dragenter", "dragover"].forEach((ev) => {
       drop.addEventListener(ev, (e) => {
         e.preventDefault();
         drop.classList.add("hot");
+      });
+      audioDrop.addEventListener(ev, (e) => {
+        e.preventDefault();
+        audioDrop.classList.add("hot");
       });
     });
     drop.addEventListener("dragleave", () => drop.classList.remove("hot"));
@@ -478,6 +683,15 @@
       e.preventDefault();
       drop.classList.remove("hot");
       addFiles(e.dataTransfer.files);
+    });
+    audioDrop.addEventListener("dragleave", () => audioDrop.classList.remove("hot"));
+    audioDrop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      audioDrop.classList.remove("hot");
+      const file = [...e.dataTransfer.files].find(
+        (f) => f.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac)$/i.test(f.name)
+      );
+      if (file) setTrack(file);
     });
     window.addEventListener("dragover", (e) => e.preventDefault());
     window.addEventListener("drop", (e) => e.preventDefault());
@@ -532,43 +746,41 @@
       render();
     });
     duration.addEventListener("input", syncDuration);
+    targetDuration.addEventListener("input", () => {
+      targetLabel.textContent = `${targetDuration.value}s`;
+    });
 
     function showError(message) {
       errorEl.textContent = message;
       errorEl.classList.remove("hidden");
     }
 
-    go.addEventListener("click", () => {
+    function postEdit(url, body, busyLabel) {
       errorEl.classList.add("hidden");
       go.disabled = true;
       statusEl.textContent = "Uploading…";
 
-      const body = new FormData();
-      for (const clip of clips) body.append("files", clip.file, clip.file.name);
-      body.append("transitionType", selectedJoin());
-      body.append("duration", duration.value);
-
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/stitch");
+      xhr.open("POST", url);
       xhr.responseType = "blob";
       xhr.upload.onprogress = (e) => {
         if (!e.lengthComputable) return;
         statusEl.textContent = `Uploading ${Math.round((e.loaded / e.total) * 100)}%`;
       };
       xhr.upload.onload = () => {
-        statusEl.textContent = "Stitching…";
+        statusEl.textContent = busyLabel;
       };
       xhr.onload = () => {
-        go.disabled = clips.length < 2;
+        syncGo();
         if (xhr.status !== 200) {
           statusEl.textContent = "";
           const blob = xhr.response;
           const reader = new FileReader();
           reader.onload = () => {
             try {
-              showError(JSON.parse(reader.result).error || "Stitch failed");
+              showError(JSON.parse(reader.result).error || "Edit failed");
             } catch {
-              showError("Stitch failed");
+              showError("Edit failed");
             }
           };
           reader.readAsText(blob);
@@ -579,30 +791,73 @@
         player.src = resultUrl;
         download.href = resultUrl;
         result.classList.remove("hidden");
-        statusEl.textContent = "Ready";
+        const bpm = xhr.getResponseHeader("X-Edit-Bpm");
+        const beats = xhr.getResponseHeader("X-Edit-Beats");
+        const segs = xhr.getResponseHeader("X-Edit-Segments");
+        const planner = xhr.getResponseHeader("X-Edit-Planner");
+        const model = xhr.getResponseHeader("X-Edit-Model");
+        const fx = xhr.getResponseHeader("X-Edit-Fx");
+        const whisper = xhr.getResponseHeader("X-Edit-Whisper") === "1";
+        if (bpm) {
+          const who = planner === "ai" ? `AI · ${model}` : "rules";
+          const extras = [fx, whisper ? "whisper" : null].filter(Boolean).join(" · ");
+          statusEl.textContent = `Ready · ${who}${extras ? ` · ${extras}` : ""} · ${bpm} BPM · ${beats} beats · ${segs} cuts`;
+        } else {
+          statusEl.textContent = "Ready";
+        }
         player.play().catch(() => {});
       };
       xhr.onerror = () => {
-        go.disabled = clips.length < 2;
+        syncGo();
         statusEl.textContent = "";
-        showError("Could not reach the stitcher");
+        showError("Could not reach the editor");
       };
       xhr.send(body);
+    }
+
+    go.addEventListener("click", () => {
+      const body = new FormData();
+      for (const clip of clips) body.append("files", clip.file, clip.file.name);
+
+      if (mode === "auto") {
+        if (track) body.append("audio", track.file, track.file.name);
+        body.append("targetDuration", targetDuration.value);
+        postEdit("/api/auto-edit", body, window.__stitchAi
+          ? "AI: beats + transitions…"
+          : "Finding drop + cutting on beats…");
+        return;
+      }
+
+      body.append("transitionType", selectedJoin());
+      body.append("duration", duration.value);
+      postEdit("/api/stitch", body, "Stitching…");
     });
 
-    async function fileFromDemo(item) {
+    async function fileFromUrl(item, fallbackType) {
       const res = await fetch(item.url);
       if (!res.ok) throw new Error(`Could not load ${item.name}`);
       const blob = await res.blob();
-      return new File([blob], item.name, { type: blob.type || "video/mp4" });
+      return new File([blob], item.name, { type: blob.type || fallbackType });
     }
 
     async function loadDemos(items) {
       statusEl.textContent = "Loading demo clips…";
       errorEl.classList.add("hidden");
       try {
-        const files = await Promise.all(items.map(fileFromDemo));
+        const files = await Promise.all(items.map((item) => fileFromUrl(item, "video/mp4")));
         addFiles(files);
+        statusEl.textContent = "";
+      } catch (err) {
+        statusEl.textContent = "";
+        showError(err.message);
+      }
+    }
+
+    async function loadDemoTrack(item) {
+      statusEl.textContent = "Loading demo track…";
+      try {
+        const file = await fileFromUrl(item, "audio/mpeg");
+        setTrack(file);
         statusEl.textContent = "";
       } catch (err) {
         statusEl.textContent = "";
@@ -617,24 +872,63 @@
       const item = demoFiles.find((file) => file.name === button.dataset.demo);
       if (item) loadDemos([item]);
     });
+    demoAudioRow.addEventListener("click", (e) => {
+      const button = e.target.closest("[data-track]");
+      if (!button) return;
+      const item = demoTracks.find((file) => file.name === button.dataset.track);
+      if (item) loadDemoTrack(item);
+    });
+
+    fetch("/api/status")
+      .then((res) => res.json())
+      .then((data) => {
+        window.__stitchAi = Boolean(data.llm);
+        const pill = document.getElementById("aiPill");
+        if (!pill) return;
+        if (data.llm) {
+          pill.textContent = data.whisper ? `AI · Whisper` : `AI · ${data.model || "on"}`;
+          pill.classList.remove("off");
+          pill.classList.add("on");
+        } else {
+          pill.textContent = "AI off";
+          pill.classList.add("off");
+          pill.classList.remove("on");
+        }
+      })
+      .catch(() => {});
 
     fetch("/api/demos")
       .then((res) => res.json())
       .then((data) => {
         demoFiles = data.files || [];
-        if (!demoFiles.length) return;
-        demos.classList.remove("hidden");
-        demoRow.innerHTML = demoFiles.map((file) => `
-          <button class="demo" type="button" data-demo="${file.name}">
-            <video src="${file.url}" muted preload="metadata"></video>
-            <span>${file.name}</span>
-          </button>
-        `).join("");
-        loadDemos(demoFiles);
+        demoTracks = data.audio || [];
+        if (demoFiles.length) {
+          demos.classList.remove("hidden");
+          demoRow.innerHTML = demoFiles.map((file) => `
+            <button class="demo" type="button" data-demo="${file.name}">
+              <video src="${file.url}" muted preload="metadata"></video>
+              <span>${file.name}</span>
+            </button>
+          `).join("");
+          loadDemos(demoFiles);
+        }
+        if (demoTracks.length) {
+          demoAudioRow.innerHTML = demoTracks.map((file) => `
+            <button class="demo" type="button" data-track="${file.name}">
+              <div class="audio-card">♪</div>
+              <span>${file.name}</span>
+            </button>
+          `).join("");
+          if (mode === "auto") {
+            demoAudio.classList.remove("hidden");
+            loadDemoTrack(demoTracks[0]);
+          }
+        }
       })
       .catch(() => {});
 
     syncDuration();
+    setMode("manual");
   </script>
 </body>
 </html>
